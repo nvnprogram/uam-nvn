@@ -275,7 +275,7 @@ ir_expression *dot(operand a, operand b)
 ir_expression*
 clamp(operand a, operand b, operand c)
 {
-   return expr(ir_binop_min, expr(ir_binop_max, a, b), c);
+    return expr(ir_unop_saturate, a);
 }
 
 ir_expression *

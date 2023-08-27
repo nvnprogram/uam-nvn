@@ -246,7 +246,7 @@ DekoCompiler::DekoCompiler(pipeline_stage stage, int optLevel) :
 			m_nvsh.sph_type = NvSphType_PS;
 			m_nvsh.shader_type = NvShaderType_Pixel;
 			m_dkph.type = DkshProgramType_Fragment;
-			resbase = 0x690;
+			resbase = 0x18;
 			break;
 		case pipeline_stage_compute:
 			m_info.type = PIPE_SHADER_COMPUTE;
@@ -262,7 +262,7 @@ DekoCompiler::DekoCompiler(pipeline_stage stage, int optLevel) :
 	m_info.io.auxCBSlot      = 17;            // Driver constbuf c[0x0]. Note that codegen was modified to transform constbuf ids like such: final_id = (raw_id + 1) % 18
 	m_info.io.drawInfoBase   = 0x000;         // This is used for gl_BaseVertex, gl_BaseInstance and gl_DrawID (in that order)
 	m_info.io.bufInfoBase    = resbase+0x0a0; // This is used to load SSBO information (u64 iova / u32 size / u32 padding)
-	m_info.io.texBindBase    = 0x020; // Start of bound texture handles (32) + images (right after). 32-bit instead of 64-bit.
+	m_info.io.texBindBase    = 0x20; // Start of bound texture handles (32) + images (right after). 32-bit instead of 64-bit.
 	m_info.io.fbtexBindBase  = 0x00c;         // This is used for implementing TGSI_OPCODE_FBFETCH, itself used for KHR/NV_blend_equation_advanced and EXT_shader_framebuffer_fetch.
 	m_info.io.sampleInfoBase = 0x830;         // This is a LUT needed to implement gl_SamplePosition, it contains MSAA base sample positions.
 	m_info.io.uboInfoBase    = 0x020;         // Similar to bufInfoBase, but for UBOs. Compute shaders need this because there aren't enough hardware constbufs.

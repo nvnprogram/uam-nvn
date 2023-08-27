@@ -1036,8 +1036,10 @@ NVC0LoweringPass::handleTEX(TexInstruction *i)
       } else if (i->tex.r == i->tex.s || i->op == OP_TXF) {
          if (i->tex.r == 0xffff)
             i->tex.r = prog->driver->io.fbtexBindBase / 4;
-         else
+         else {
+			i->tex.r *= 2; //*2 for tex + sampler locations
             i->tex.r += prog->driver->io.texBindBase / 4;
+		 }
          i->tex.s  = 0; // only a single cX[] value possible here
       } else {
          Value *hnd = bld.getScratch();
