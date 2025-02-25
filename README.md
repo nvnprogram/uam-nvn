@@ -3,13 +3,15 @@
 This is a modified version of the deko3d shader compiler that can compile NVN shaders.
 
 ```
-Usage: uam.exe [options] file
+Usage: uam [options] file
 Options:
   -o, --out=<file>      Specifies the output deko3d shader module file (.dksh)
   -r, --raw=<file>      Specifies the file to which output raw Maxwell bytecode
   -t, --tgsi=<file>     Specifies the file to which output intermediary TGSI code
   -s, --stage=<name>    Specifies the pipeline stage of the shader
                         (vert, tess_ctrl, tess_eval, geom, frag, comp)
+                        If not specified, will be deduced from file extension
+                        (.vert, .frag, .geom, .tesc, .tese, .comp)
   -c, --nvnctrl=<file>  Specifies the output NVN shader control file
   -g, --nvngpu=<file>   Specifies the output NVN GPU program file
   -e, --epicsh=<file>   Specifies the output Epic shader format file(see Readme)
@@ -17,9 +19,14 @@ Options:
   -v, --version         Displays version information
 ```
 
-`--nvnctrl` is the path of the output NVN shader control file, and `--nvngpu` is the path of the output program file (with the nvn header and ready for use)
+## Differences from original uam:
 
-`epicsh` format is basically just nvn shader and control in one file, for convenience.
+- Build nvn shader control + program bins, `--nvnctrl` is the path of the output NVN shader control file, and `--nvngpu` is the path of the output program file (with the nvn header and ready for use)
+- Build nvn shader control + program in one file, `epicsh` format is basically just nvn shader and control in one file, for convenience.
+- If you want to compile your shaders you previously were compiling with glslc without changing anything, use the `--glslcbinds` flag and you will not have to modify them(the uniform ids in deko3d shaders are offset by -1 from glslc ids). This is equivalent to adding `+1` to all binding ids in the original glsl code.
+- Fixed scheduler, which was causing graphical issues that looked similar to z fighting.
+
+`epicsh` format:
 ```
 u64 codeSize;
 (code data)
@@ -28,26 +35,35 @@ u64 controlSize;
 ```
 
 ## Example Usage
+- Build nvn shader with control as control.bin and program as program.bin, using glslc binding scheme:
 ```
-uam.exe --glslcbinds --nvnctrl=control.bin --nvngpu=program.bin --stage=frag shader.frag
-uam.exe --glslcbinds --epicsh=output.epicshf --stage=frag shader.frag
+uam --glslcbinds --nvnctrl=control.bin --nvngpu=program.bin shader.frag
 ```
 
-If you want to compile your shaders you previously were compiling with glslc, use the `--glslcbinds` flag and you will not have to modify them.
+- Build nvn shader in epicsh format with output.epicshf, using glslc binding scheme:
+```
+uam --glslcbinds --epicsh=output.epicshf shader.frag
+```
 
-
-As of right now, only fragment and vertex shaders were fully tested. Anything that has bitwise operations (gsys Vertex Shaders for example) may not work(the exact reasoning is if in our glsl code, we have
-
+## Known Issues
+As of right now, only fragment and vertex shaders were fully tested. Anything that has bitwise operations (gsys Vertex Shaders for example) may not work(for example, if in our glsl code, we have
+```
 low16  = floatBitsToInt(value) & 0xFFFF;
 high16 = floatBitsToUint(value) >> 16; 
-
+```
 Our compiler currently produces
-
+```
 low16 = floatBitsToInt(value) & 0xFFFF;
 high16_incorrect = uint(low16) >> 16;  // now always zero instead of high16, because we take uint(low16) instead of floatBitsToUint(value)
+```
+likely some issue with CSE/Register Allocation, feel free to contribute if you can fix it)
 
-please help me fix this if you can)
+## Credits:
+- https://github.com/devkitPro/uam - Main compiler repository
+- https://github.com/KillzXGaming/uam - Additional fixes and improvements
+- https://github.com/nvnprogram - This repo
 
+## Original README
 
 UAM is the shader compiler designed to produce precompiled DKSH shaders usable with the deko3d graphics API, specifically for the Nvidia Tegra X1 processor found inside the Nintendo Switch.
 
@@ -84,7 +100,3 @@ UAM is based on [mesa](https://www.mesa3d.org/)'s GLSL parser and TGSI infrastru
 		- `MOV Rd,RZ` is now preferred to `MOV32I Rd,0`.
 		- `LDG`/`STG` instructions are used for SSBO accesses instead of `LD`/`ST`.
 		- Shader programs are properly padded out to a size that is a multiple of 64 bytes.
-
-Credits:
-- https://github.com/devkitPro/uam - Main compiler repository
-- https://github.com/KillzXGaming/uam - Additional fixes and improvements

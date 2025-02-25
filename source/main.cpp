@@ -1,5 +1,6 @@
 #include "compiler_iface.h"
 #include <getopt.h>
+#include <string>
 
 static int usage(const char* prog)
 {
@@ -11,6 +12,8 @@ static int usage(const char* prog)
 		"  -t, --tgsi=<file>     Specifies the file to which output intermediary TGSI code\n"
 		"  -s, --stage=<name>    Specifies the pipeline stage of the shader\n"
 		"                        (vert, tess_ctrl, tess_eval, geom, frag, comp)\n"
+		"                        If not specified, will be deduced from file extension\n"
+		"                        (.vert, .frag, .geom, .tesc, .tese, .comp)\n"
 		"  -c, --nvnctrl=<file>  Specifies the output NVN shader control file\n" 
 		"  -g, --nvngpu=<file>   Specifies the output NVN GPU program file\n"
 		"  -e, --epicsh=<file>   Specifies the output Epic shader format file(see Readme)\n"
@@ -18,6 +21,20 @@ static int usage(const char* prog)
 		"  -v, --version         Displays version information\n"
 		, prog);
 	return EXIT_FAILURE;
+}
+
+const char* getShaderStageStr(const std::string& filename) {
+    size_t dotPos = filename.find_last_of('.');
+    if (dotPos == std::string::npos) return NULL; 
+    
+    std::string ext = filename.substr(dotPos);
+    if (ext == ".vert") return "vert";
+    else if (ext == ".frag") return "frag";
+    else if (ext == ".geom") return "geom";
+    else if (ext == ".tesc") return "tess_ctrl";
+    else if (ext == ".tese") return "tess_eval";
+    else if (ext == ".comp") return "comp";
+    return NULL;
 }
 
 int main(int argc, char* argv[])
@@ -65,10 +82,12 @@ int main(int argc, char* argv[])
 		return usage(argv[0]);
 	inFile = argv[optind];
 
-	if (!stageName)
-	{
-		fprintf(stderr, "Missing pipeline stage argument (--stage)\n");
-		return EXIT_FAILURE;
+	if (!stageName){
+		stageName = getShaderStageStr(inFile);
+		if(stageName == NULL){
+			fprintf(stderr, "Could not deduce stage from file extension\n Please specify the stage (--stage) or use a standard extension(.vert, .frag, .geom, .tesc, .tese, .comp)\n");
+			return EXIT_FAILURE;
+		}
 	}
 
 	if (!outFile && !rawFile && !tgsiFile && !(nvnCtrlFile && nvnGpuFile) && !epicshFile)
