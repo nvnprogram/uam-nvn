@@ -81,7 +81,6 @@ static bool match_layout_qualifier(const char *s1, const char *s2,
 %expect 0
 
 %define api.pure // fincs-edit
-%define parse.error verbose // fincs-edit
 
 %locations
 %initial-action {

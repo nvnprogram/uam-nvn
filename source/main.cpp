@@ -6,33 +6,44 @@ static int usage(const char* prog)
 	fprintf(stderr,
 		"Usage: %s [options] file\n"
 		"Options:\n"
-		"  -o, --out=<file>   Specifies the output deko3d shader module file (.dksh)\n"
-		"  -r, --raw=<file>   Specifies the file to which output raw Maxwell bytecode\n"
-		"  -t, --tgsi=<file>  Specifies the file to which output intermediary TGSI code\n"
-		"  -s, --stage=<name> Specifies the pipeline stage of the shader\n"
-		"                     (vert, tess_ctrl, tess_eval, geom, frag, comp)\n"
-		"  -v, --version      Displays version information\n"
+		"  -o, --out=<file>      Specifies the output deko3d shader module file (.dksh)\n"
+		"  -r, --raw=<file>      Specifies the file to which output raw Maxwell bytecode\n"
+		"  -t, --tgsi=<file>     Specifies the file to which output intermediary TGSI code\n"
+		"  -s, --stage=<name>    Specifies the pipeline stage of the shader\n"
+		"                        (vert, tess_ctrl, tess_eval, geom, frag, comp)\n"
+		"  -c, --nvnctrl=<file>  Specifies the output NVN shader control file\n" 
+		"  -g, --nvngpu=<file>   Specifies the output NVN GPU program file\n"
+		"  -e, --epicsh=<file>   Specifies the output Epic shader format file(see Readme)\n"
+		"  -b, --glslcbinds      Use GLSLC uniform binding scheme (basically add 1 to all ids)\n"
+		"  -v, --version         Displays version information\n"
 		, prog);
 	return EXIT_FAILURE;
 }
 
 int main(int argc, char* argv[])
 {
-	const char *inFile = nullptr, *outFile = nullptr, *rawFile = nullptr, *tgsiFile = nullptr, *stageName = nullptr;
+	const char *inFile = nullptr, *outFile = nullptr, *rawFile = nullptr, *tgsiFile = nullptr;
+	const char *stageName = nullptr, *nvnCtrlFile = nullptr, *nvnGpuFile = nullptr;
+	const char *epicshFile = nullptr;
+	bool isGlslcBinding = false;
 
 	static struct option long_options[] =
 	{
-		{ "out",     required_argument, NULL, 'o' },
-		{ "raw",     required_argument, NULL, 'r' },
-		{ "tgsi",    required_argument, NULL, 't' },
-		{ "stage",   required_argument, NULL, 's' },
-		{ "help",    no_argument,       NULL, '?' },
-		{ "version", no_argument,       NULL, 'v' },
+		{ "out",       required_argument, NULL, 'o' },
+		{ "raw",       required_argument, NULL, 'r' },
+		{ "tgsi",      required_argument, NULL, 't' },
+		{ "stage",     required_argument, NULL, 's' },
+		{ "nvnctrl",   required_argument, NULL, 'c' },
+		{ "nvngpu",    required_argument, NULL, 'g' },
+		{ "epicsh",    required_argument, NULL, 'e' },
+		{ "glslcbinds", no_argument,      NULL, 'b' },
+		{ "help",      no_argument,       NULL, '?' },
+		{ "version",   no_argument,       NULL, 'v' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int opt, optidx = 0;
-	while ((opt = getopt_long(argc, argv, "o:r:t:s:?v", long_options, &optidx)) != -1)
+	while ((opt = getopt_long(argc, argv, "o:r:t:s:c:g:e:b?v", long_options, &optidx)) != -1)
 	{
 		switch (opt)
 		{
@@ -40,6 +51,10 @@ int main(int argc, char* argv[])
 			case 'r': rawFile = optarg; break;
 			case 't': tgsiFile = optarg; break;
 			case 's': stageName = optarg; break;
+			case 'c': nvnCtrlFile = optarg; break;
+			case 'g': nvnGpuFile = optarg; break;
+			case 'e': epicshFile = optarg; break;
+			case 'b': isGlslcBinding = true; break;
 			case '?': usage(argv[0]); return EXIT_SUCCESS;
 			case 'v': printf("%s - Built on %s %s\n", PACKAGE_STRING, __DATE__, __TIME__); return EXIT_SUCCESS;
 			default:  return usage(argv[0]);
@@ -56,7 +71,7 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
-	if (!outFile && !rawFile && !tgsiFile)
+	if (!outFile && !rawFile && !tgsiFile && !(nvnCtrlFile && nvnGpuFile) && !epicshFile)
 	{
 		fprintf(stderr, "No output file specified\n");
 		return EXIT_FAILURE;
@@ -94,7 +109,7 @@ int main(int argc, char* argv[])
 	fclose(fin);
 	glsl_source[fsize] = 0;
 
-	DekoCompiler compiler{stage};
+	DekoCompiler compiler{stage, 3, isGlslcBinding};
 	bool rc = compiler.CompileGlsl(glsl_source);
 	delete[] glsl_source;
 
@@ -109,6 +124,12 @@ int main(int argc, char* argv[])
 
 	if (tgsiFile)
 		compiler.OutputTgsi(tgsiFile);
+
+	if (nvnCtrlFile && nvnGpuFile)
+		compiler.OutputNvnBinary(nvnCtrlFile, nvnGpuFile);
+
+	if (epicshFile)
+		compiler.OutputEpicShader(epicshFile);
 
 	return EXIT_SUCCESS;
 }

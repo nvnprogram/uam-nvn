@@ -122,6 +122,8 @@ private:
    void emitSAM();
    void emitRAM();
 
+   void emitPSETP();
+
    void emitMOV();
    void emitS2R();
    void emitCS2R();
@@ -168,6 +170,7 @@ private:
    void emitBFI();
    void emitBFE();
    void emitFLO();
+   void emitPRMT();
 
    void emitLDSTs(int, DataType);
    void emitLDSTc(int);
@@ -692,6 +695,31 @@ CodeEmitterGM107::emitRAM()
  * predicate/cc
  ******************************************************************************/
 
+void
+CodeEmitterGM107::emitPSETP()
+{
+
+   emitInsn(0x50900000);
+
+   switch (insn->op) {
+   case OP_AND: emitField(0x18, 3, 0); break;
+   case OP_OR:  emitField(0x18, 3, 1); break;
+   case OP_XOR: emitField(0x18, 3, 2); break;
+   default:
+      assert(!"unexpected operation");
+      break;
+   }
+
+   // emitINV (0x2a);
+   emitPRED(0x27); // TODO: support 3-arg
+   emitINV (0x20, insn->src(1));
+   emitPRED(0x1d, insn->src(1));
+   emitINV (0x0f, insn->src(0));
+   emitPRED(0x0c, insn->src(0));
+   emitPRED(0x03, insn->def(0));
+   emitPRED(0x00);
+}
+
 /*******************************************************************************
  * movement / conversion
  ******************************************************************************/
@@ -958,8 +986,8 @@ CodeEmitterGM107::emitSEL()
    emitGPR (0x08, insn->src(0));
    emitGPR (0x00, insn->def(0));
 
-   if (insn->subOp == 1) {
-      addInterp(0, 0, selpFlip);
+   if (insn->subOp >= 1) {
+      addInterp(insn->subOp - 1, 0, selpFlip);
    }
 }
 
@@ -2346,6 +2374,33 @@ CodeEmitterGM107::emitFLO()
    emitGPR  (0x00, insn->def(0));
 }
 
+void
+CodeEmitterGM107::emitPRMT()
+{
+   switch (insn->src(1).getFile()) {
+   case FILE_GPR:
+      emitInsn(0x5bc00000);
+      emitGPR (0x14, insn->src(1));
+      break;
+   case FILE_MEMORY_CONST:
+      emitInsn(0x4bc00000);
+      emitCBUF(0x22, -1, 0x14, 16, 2, insn->src(1));
+      break;
+   case FILE_IMMEDIATE:
+      emitInsn(0x36c00000);
+      emitIMMD(0x14, 19, insn->src(1));
+      break;
+   default:
+      assert(!"bad src1 file");
+      break;
+   }
+
+   emitField(0x30, 3, insn->subOp);
+   emitGPR  (0x27, insn->src(2));
+   emitGPR  (0x08, insn->src(0));
+   emitGPR  (0x00, insn->def(0));
+}
+
 /*******************************************************************************
  * memory
  ******************************************************************************/
@@ -3284,26 +3339,30 @@ void
 CodeEmitterGM107::emitSULDx()
 {
    const TexInstruction *insn = this->insn->asTex();
-   int type = 0;
 
    emitInsn(0xeb000000);
-   if (insn->op == OP_SULDB)
-      emitField(0x34, 1, 1);
-   emitSUTarget();
 
-   switch (insn->dType) {
-   case TYPE_S8:   type = 1; break;
-   case TYPE_U16:  type = 2; break;
-   case TYPE_S16:  type = 3; break;
-   case TYPE_U32:  type = 4; break;
-   case TYPE_U64:  type = 5; break;
-   case TYPE_B128: type = 6; break;
-   default:
-      assert(insn->dType == TYPE_U8);
-      break;
+   if (insn->op == OP_SULDB) {
+      int type = 0;
+      emitField(0x34, 1, 1);
+      switch (insn->dType) {
+      case TYPE_S8:   type = 1; break;
+      case TYPE_U16:  type = 2; break;
+      case TYPE_S16:  type = 3; break;
+      case TYPE_U32:  type = 4; break;
+      case TYPE_U64:  type = 5; break;
+      case TYPE_B128: type = 6; break;
+      default:
+         assert(insn->dType == TYPE_U8);
+         break;
+      }
+      emitField(0x14, 3, type);
+   } else {
+      emitField(0x14, 4, 0xf); // rgba
    }
+
+   emitSUTarget();
    emitLDSTc(0x18);
-   emitField(0x14, 3, type);
    emitGPR  (0x00, insn->def(0));
    emitGPR  (0x08, insn->src(0));
 
@@ -3536,6 +3595,9 @@ CodeEmitterGM107::emitInstruction(Instruction *i)
    case OP_BFIND:
       emitFLO();
       break;
+   case OP_PERMT:
+      emitPRMT();
+      break;
    case OP_SLCT:
       if (isFloatType(insn->dType))
          emitFCMP();
@@ -3583,7 +3645,12 @@ CodeEmitterGM107::emitInstruction(Instruction *i)
    case OP_AND:
    case OP_OR:
    case OP_XOR:
-      emitLOP();
+      switch (insn->def(0).getFile()) {
+      case FILE_GPR: emitLOP(); break;
+      case FILE_PREDICATE: emitPSETP(); break;
+      default:
+         assert(!"invalid bool op");
+      }
       break;
    case OP_NOT:
       emitNOT();
@@ -3739,7 +3806,7 @@ CodeEmitterGM107::getMinEncodingSize(const Instruction *i) const
 class SchedDataCalculatorGM107 : public Pass
 {
 public:
-   SchedDataCalculatorGM107(const TargetGM107 *targ) : lastDualIssued(false), targ(targ) {}
+   SchedDataCalculatorGM107(const TargetGM107 *targ) : targ(targ) {}
 
 private:
    struct RegScores
@@ -3835,7 +3902,6 @@ private:
 
    RegScores *score; // for current BB
    std::vector<RegScores> scoreBoards;
-   bool lastDualIssued;
 
    const TargetGM107 *targ;
    bool visit(Function *);
@@ -4113,13 +4179,19 @@ SchedDataCalculatorGM107::setDelay(Instruction *insn, int delay,
       delay = 0xd;
    }
 
+   if (!next || !targ->canDualIssue(insn, next)) {
+      delay = CLAMP(delay, GM107_MIN_ISSUE_DELAY, GM107_MAX_ISSUE_DELAY);
+   } else {
+      delay = 0x0; // dual-issue
+   }
+
    wr = getWrDepBar(insn);
    rd = getRdDepBar(insn);
 
-   if (delay <= GM107_MIN_ISSUE_DELAY && (wr & rd) != 7) {
+   if (delay == GM107_MIN_ISSUE_DELAY && (wr & rd) != 7) {
       // Barriers take one additional clock cycle to become active on top of
       // the clock consumed by the instruction producing it.
-      if (!next) {
+      if (!next || insn->bb != next->bb) {
          delay = 0x2;
       } else {
          int wt = getWtDepBar(next);
@@ -4127,18 +4199,7 @@ SchedDataCalculatorGM107::setDelay(Instruction *insn, int delay,
             delay = 0x2;
       }
    }
-
-   if (lastDualIssued || !next || delay > 1 || !targ->canDualIssue(insn, next)) {
-      delay = CLAMP(delay, GM107_MIN_ISSUE_DELAY, GM107_MAX_ISSUE_DELAY);
-      lastDualIssued = false;
-   } else {
-      delay = 0x0; // dual-issue
-      lastDualIssued = true;
-   }
-
    emitStall(insn, delay);
-   if (lastDualIssued)
-      emitYield(insn);
 }
 
 
@@ -4528,17 +4589,11 @@ SchedDataCalculatorGM107::visit(BasicBlock *bb)
             bbDelay = MAX2(bbDelay, calcDelay(next, c));
             c += getStall(next);
          }
+         next = NULL;
       }
    }
-
-   int i;
-   Function *func = bb->getFunction();
-   for (i = 0; i < func->bbCount; ++i) {
-      if (func->bbArray[i] == bb)
-         break;
-   }
-
-   next = (i >= func->bbCount - 1) ? NULL : func->bbArray[i + 1]->getEntry();
+   if (bb->cfg.outgoingCount() != 1)
+      next = NULL;
    setDelay(insn, bbDelay, next);
    cycle += getStall(insn);
 

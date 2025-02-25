@@ -155,7 +155,6 @@ add_builtin_define(glcpp_parser_t *parser, const char *name, int value);
 %}
 
 %define api.pure // fincs-edit
-%define parse.error verbose // fincs-edit
 
 %locations
 %initial-action {

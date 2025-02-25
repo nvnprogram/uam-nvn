@@ -24,6 +24,8 @@
 #ifndef LINK_UNIFORM_BLOCK_ACTIVE_VISITOR_H
 #define LINK_UNIFORM_BLOCK_ACTIVE_VISITOR_H
 
+void set_is_glslc_binding(bool offset);
+
 #include "ir.h"
 #include "util/hash_table.h"
 

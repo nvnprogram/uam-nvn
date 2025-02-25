@@ -200,9 +200,9 @@ nvc0_program_assign_varying_slots(struct nv50_ir_prog_info *info)
 	return ret;
 }
 
-DekoCompiler::DekoCompiler(pipeline_stage stage, int optLevel) :
+DekoCompiler::DekoCompiler(pipeline_stage stage, int optLevel, bool isGlslcBinding) :
 	m_stage{stage}, m_glsl{}, m_tgsi{}, m_tgsiNumTokens{}, m_info{}, m_code{}, m_codeSize{},
-	m_nvsh{}, m_dkph{}
+	m_data{}, m_dataSize{}, m_isGlslcBinding{isGlslcBinding}, m_nvsh{}, m_dkph{}
 {
 	m_nvsh.version = 3;
 	m_nvsh.sass_version = 3;
@@ -279,6 +279,10 @@ DekoCompiler::DekoCompiler(pipeline_stage stage, int optLevel) :
 	m_info.assignSlots = nvc0_program_assign_varying_slots;
 
 	glsl_frontend_init();
+
+	// Sorry, I'm lazy
+	// ubo binding offset + 1
+	set_is_glslc_binding(isGlslcBinding);
 }
 
 DekoCompiler::~DekoCompiler()
@@ -470,7 +474,7 @@ void DekoCompiler::GenerateHeaders()
 			{
 				default:
 				case pipeline_stage_vertex:
-					//m_nvsh.vsh_unk_flag = 1;
+					m_nvsh.vsh_unk_flag = 1;
 					break;
 
 				case pipeline_stage_tess_ctrl:
@@ -675,6 +679,146 @@ void DekoCompiler::OutputTgsi(const char* tgsiFile)
 	if (f)
 	{
 		tgsi_dump_to_file(m_tgsi, TGSI_DUMP_FLOAT_AS_HEX, f);
+		fclose(f);
+	}
+}
+
+GPUProgramHeader DekoCompiler::CreateGpuHeader() const 
+{
+	GPUProgramHeader gpuHeader = {};
+	gpuHeader.magic = 0x12345678;
+	gpuHeader.nvsh = m_nvsh;
+	return gpuHeader;
+}
+
+NVNshaderControl DekoCompiler::CreateControlHeader() const 
+{
+	NVNshaderControl control;
+	memset(&control, 0, sizeof(control));
+	
+	control.magic = 0x98761234;
+	control.mMajorVer = 1;
+	control.mMinorVer = 5;
+	control.unk0 = 0x120;
+	control.unk1 = 0xb;
+
+	control.mProgramSize = 0x50 + m_codeSize;
+	control.mConstBufSize = m_dataSize;
+	control.mConstBufOffset = Align256(0x30 + 0x50 + m_codeSize); 
+	control.mShaderSize =  Align256(control.mConstBufOffset + m_dataSize);
+	
+	control.mGlasmOffset = sizeof(NVNshaderControl) - 8;
+	control.mGlasmSize = 0;
+	control.mGlasmUnk0 = 0;
+	control.mGlasmUnk1 = sizeof(NVNshaderControl) - 7;
+	control.unk2 = sizeof(NVNshaderControl) - 7;
+	control.unk3 = 0;
+
+	control.mProgramOffset = 0x30;
+	control.mProgramRegNum = m_dkph.num_gprs;
+	control.mPerWarpScratchSize = m_dkph.per_warp_scratch_sz;
+	
+	switch (m_stage) {
+		case pipeline_stage_vertex:
+			control.mShaderStage = NVN_SHADER_STAGE_VERTEX;
+			break;
+		case pipeline_stage_fragment:
+			control.mShaderStage = NVN_SHADER_STAGE_FRAGMENT;
+			control.early_fragment_tests = m_dkph.frag.early_fragment_tests;
+			control.post_depth_coverage = m_dkph.frag.post_depth_coverage;
+			control.frag.per_sample_invocation = m_dkph.frag.per_sample_invocation;
+			control.numColourResults = m_info.prop.fp.numColourResults;
+			control.writesDepth = m_info.prop.fp.writesDepth;
+			break;
+		case pipeline_stage_geometry:
+			control.mShaderStage = NVN_SHADER_STAGE_GEOMETRY;
+			break;
+		case pipeline_stage_tess_ctrl:
+			control.mShaderStage = NVN_SHADER_STAGE_TESS_CONTROL;
+			break;
+		case pipeline_stage_tess_eval:
+			control.mShaderStage = NVN_SHADER_STAGE_TESS_EVALUATION;
+			break;
+		case pipeline_stage_compute:
+			control.mShaderStage = NVN_SHADER_STAGE_COMPUTE;
+			memcpy(&control.comp, &m_dkph.comp, sizeof(m_dkph.comp));
+			break;
+	}
+
+	return control;
+}
+
+void DekoCompiler::OutputNvnBinary(const char* controlFile, const char* gpuProgramFile)
+{
+	auto control = CreateControlHeader();
+	auto gpuHeader = CreateGpuHeader();
+
+	// Write control section
+	FILE* cf = fopen(controlFile, "wb");
+	if (cf) {
+		fwrite(&control, 1, sizeof(control), cf);
+		fclose(cf);
+	}
+
+	// Write GPU program binary  
+	FILE* gf = fopen(gpuProgramFile, "wb");
+	if (gf) {
+		// Write header
+		fwrite(&gpuHeader, 1, sizeof(gpuHeader), gf);
+		
+		// Write code
+		fwrite(m_code, 1, m_codeSize, gf);
+		
+		// Align to next section
+		FileWritePadding(gf, Align256(0x30 + 0x50 + m_codeSize) - (0x30 + 0x50 + m_codeSize));
+
+		// Write constants if present
+		if (m_dataSize) {
+			fwrite(m_data, 1, m_dataSize, gf);
+			// Align entire file
+			FileWritePadding(gf, Align256(control.mShaderSize) - control.mShaderSize);
+		}
+
+		fclose(gf);
+	}
+}
+
+void DekoCompiler::OutputEpicShader(const char* epicshFile)
+{
+	auto control = CreateControlHeader();
+	auto gpuHeader = CreateGpuHeader();
+
+	// Calculate total data size (GPU program section)
+	uint64_t dataSize = control.mShaderSize;  // Already includes all padding
+
+	// Calculate control size
+	uint64_t controlSize = sizeof(control);
+
+	FILE* f = fopen(epicshFile, "wb");
+	if (f) {
+		// Write data size
+		fwrite(&dataSize, 1, sizeof(dataSize), f);
+
+		// Write GPU program data
+		fwrite(&gpuHeader, 1, sizeof(gpuHeader), f);
+		fwrite(m_code, 1, m_codeSize, f);
+		
+		// Align to next section
+		FileWritePadding(f, Align256(0x30 + 0x50 + m_codeSize) - (0x30 + 0x50 + m_codeSize));
+
+		// Write constants if present
+		if (m_dataSize) {
+			fwrite(m_data, 1, m_dataSize, f);
+			// Align entire file
+			FileWritePadding(f, Align256(control.mShaderSize) - control.mShaderSize);
+		}
+
+		// Write control size
+		fwrite(&controlSize, 1, sizeof(controlSize), f);
+
+		// Write control data
+		fwrite(&control, 1, sizeof(control), f);
+
 		fclose(f);
 	}
 }

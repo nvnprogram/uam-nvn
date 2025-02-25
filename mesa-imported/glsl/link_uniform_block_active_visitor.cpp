@@ -25,6 +25,11 @@
 #include "program.h"
 #include "linker_util.h"
 
+static bool g_isGlslcBinding = false;
+void set_is_glslc_binding(bool offset) {
+   g_isGlslcBinding = offset;
+}
+
 static link_uniform_block_active *
 process_block(void *mem_ctx, struct hash_table *ht, ir_variable *var)
 {
@@ -49,7 +54,7 @@ process_block(void *mem_ctx, struct hash_table *ht, ir_variable *var)
 
       if (var->data.explicit_binding) {
          b->has_binding = true;
-         b->binding = var->data.binding;
+         b->binding = var->data.binding + int(g_isGlslcBinding);
       } else {
          b->has_binding = false;
          b->binding = 0;

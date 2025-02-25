@@ -1,15 +1,53 @@
-# UAM - deko3d shader compiler
+# UAM-nvn - nvn shader compiler.
+
+This is a modified version of the deko3d shader compiler that can compile NVN shaders.
 
 ```
-Usage: uam [options] file
+Usage: uam.exe [options] file
 Options:
-  -o, --out=<file>   Specifies the output deko3d shader module file (.dksh)
-  -r, --raw=<file>   Specifies the file to which output raw Maxwell bytecode
-  -t, --tgsi=<file>  Specifies the file to which output intermediary TGSI code
-  -s, --stage=<name> Specifies the pipeline stage of the shader
-                     (vert, tess_ctrl, tess_eval, geom, frag, comp)
-  -v, --version      Displays version information
+  -o, --out=<file>      Specifies the output deko3d shader module file (.dksh)
+  -r, --raw=<file>      Specifies the file to which output raw Maxwell bytecode
+  -t, --tgsi=<file>     Specifies the file to which output intermediary TGSI code
+  -s, --stage=<name>    Specifies the pipeline stage of the shader
+                        (vert, tess_ctrl, tess_eval, geom, frag, comp)
+  -c, --nvnctrl=<file>  Specifies the output NVN shader control file
+  -g, --nvngpu=<file>   Specifies the output NVN GPU program file
+  -e, --epicsh=<file>   Specifies the output Epic shader format file(see Readme)
+  -b, --glslcbinds      Use GLSLC uniform binding scheme (basically add 1 to all ids)
+  -v, --version         Displays version information
 ```
+
+`--nvnctrl` is the path of the output NVN shader control file, and `--nvngpu` is the path of the output program file (with the nvn header and ready for use)
+
+`epicsh` format is basically just nvn shader and control in one file, for convenience.
+```
+u64 codeSize;
+(code data)
+u64 controlSize;
+(control data)
+```
+
+## Example Usage
+```
+uam.exe --glslcbinds --nvnctrl=control.bin --nvngpu=program.bin --stage=frag shader.frag
+uam.exe --glslcbinds --epicsh=output.epicshf --stage=frag shader.frag
+```
+
+If you want to compile your shaders you previously were compiling with glslc, use the `--glslcbinds` flag and you will not have to modify them.
+
+
+As of right now, only fragment and vertex shaders were fully tested. Anything that has bitwise operations (gsys Vertex Shaders for example) may not work(the exact reasoning is if in our glsl code, we have
+
+low16  = floatBitsToInt(value) & 0xFFFF;
+high16 = floatBitsToUint(value) >> 16; 
+
+Our compiler currently produces
+
+low16 = floatBitsToInt(value) & 0xFFFF;
+high16_incorrect = uint(low16) >> 16;  // now always zero instead of high16, because we take uint(low16) instead of floatBitsToUint(value)
+
+please help me fix this if you can)
+
 
 UAM is the shader compiler designed to produce precompiled DKSH shaders usable with the deko3d graphics API, specifically for the Nvidia Tegra X1 processor found inside the Nintendo Switch.
 
@@ -46,3 +84,7 @@ UAM is based on [mesa](https://www.mesa3d.org/)'s GLSL parser and TGSI infrastru
 		- `MOV Rd,RZ` is now preferred to `MOV32I Rd,0`.
 		- `LDG`/`STG` instructions are used for SSBO accesses instead of `LD`/`ST`.
 		- Shader programs are properly padded out to a size that is a multiple of 64 bytes.
+
+Credits:
+- https://github.com/devkitPro/uam - Main compiler repository
+- https://github.com/KillzXGaming/uam - Additional fixes and improvements
