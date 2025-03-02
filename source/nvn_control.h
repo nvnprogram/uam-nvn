@@ -1,15 +1,8 @@
-#include <stddef.h>
 #include "nv_attributes.h"
 #include "nv_shader_header.h"
+#include <stddef.h>
 
-typedef unsigned long long uint64_t;
-typedef signed long long int64_t;
-typedef unsigned int uint32_t;
-typedef signed int int32_t;
-typedef unsigned short uint16_t;
-typedef signed short int16_t;
-typedef unsigned char uint8_t;
-typedef signed char int8_t;
+#include <cstdint>
 
 enum NVNshaderStage {
     NVN_SHADER_STAGE_VERTEX = 0,
@@ -34,7 +27,7 @@ struct NVNshaderControl {
     uint32_t mGlasmSize; // = 0
     uint32_t mGlasmUnk0; // = 0
     uint32_t mGlasmUnk1; // = sizeof(NVNshaderControl) - 7
-    uint8_t padding1[0x6f0 - 0x24]; 
+    uint8_t padding1[0x6f0 - 0x24];
 
     uint32_t unk2; // = sizeof(NVNshaderControl) - 7
     uint32_t unk3; // = 0
@@ -63,24 +56,23 @@ struct NVNshaderControl {
 
     uint32_t numColourResults; // for frag
 
-    uint8_t padding4[0x10]; 
+    uint8_t padding4[0x10];
 
     union {
         struct {
-            uint8_t   paddingFragUnk[2]; // 0s
-            uint8_t   per_sample_invocation;
+            uint8_t paddingFragUnk[2]; // 0s
+            uint8_t per_sample_invocation;
         } frag;
         struct
-		{
-			uint32_t block_dims[3];
-			uint32_t shared_mem_sz;
-			uint32_t local_pos_mem_sz;
-			uint32_t local_neg_mem_sz;
-			uint32_t crs_sz;
-			uint32_t num_barriers;
-		} comp; // same as dksh
+        {
+            uint32_t block_dims[3];
+            uint32_t shared_mem_sz;
+            uint32_t local_pos_mem_sz;
+            uint32_t local_neg_mem_sz;
+            uint32_t crs_sz;
+            uint32_t num_barriers;
+        } comp; // same as dksh
     };
-
 
     uint8_t endPadding[0x60]; // 0x7C0 + 8 zeroed bytes just in case
 };
