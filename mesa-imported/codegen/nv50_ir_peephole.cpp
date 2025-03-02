@@ -3166,8 +3166,7 @@ MemoryOpt::runOpt(BasicBlock *bb)
          continue;
       if (ldst->perPatch) // TODO: create separate per-patch lists
          continue;
-
-      if (isLoad) {
+      else if (isLoad) {
          DataFile file = ldst->src(0).getFile();
 
          // if ld l[]/g[] look for previous store to eliminate the reload
@@ -3183,9 +3182,10 @@ MemoryOpt::runOpt(BasicBlock *bb)
          if (rec) {
             if (!isAdjacent)
                keep = !replaceLdFromLd(ldst, rec);
-            else
+            else if (ldst->op != OP_VFETCH) // edit: nx doesnt combine vfetch
                // or combine a previous load with this one
                keep = !combineLd(rec, ldst);
+            
          }
          if (keep)
             lockStores(ldst);
@@ -3194,7 +3194,7 @@ MemoryOpt::runOpt(BasicBlock *bb)
          if (rec) {
             if (!isAdjacent)
                keep = !replaceStFromSt(ldst, rec);
-            else
+            else if (ldst->op != OP_EXPORT) // edit: nx doesnt combine export
                keep = !combineSt(rec, ldst);
          }
          if (keep)

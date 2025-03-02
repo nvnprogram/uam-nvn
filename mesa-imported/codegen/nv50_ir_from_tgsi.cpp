@@ -1829,6 +1829,18 @@ private:
    Stack breakBBs; // end of / after loop
 
    Value *viewport;
+
+   struct VertexOutput {
+      VertexOutput(const tgsi::Instruction::DstRegister& d, int channel, Value *value, Value *pointer) 
+         : dst(d), c(channel), val(value), ptr(pointer) {}
+      
+      tgsi::Instruction::DstRegister dst;
+      int c;
+      Value *val;
+      Value *ptr;
+   };
+
+   std::vector<VertexOutput> vertexOutputs;
 };
 
 Symbol *
@@ -2248,7 +2260,8 @@ Converter::storeDst(const tgsi::Instruction::DstRegister dst, int c,
       assert(!ptr);
       mkOp2(OP_WRSV, TYPE_U32, NULL, dstToSym(dst, c), val);
    } else
-   if (f == TGSI_FILE_OUTPUT && prog->getType() != Program::TYPE_FRAGMENT) {
+   if (f == TGSI_FILE_OUTPUT && prog->getType() != Program::TYPE_FRAGMENT && prog->getType() != Program::TYPE_VERTEX) {
+      // This condition now excludes both fragment and vertex shaders
 
       if (ptr || (info->out[idx].mask & (1 << c))) {
          /* Save the viewport index into a scratch register so that it can be
@@ -2261,6 +2274,10 @@ Converter::storeDst(const tgsi::Instruction::DstRegister dst, int c,
             mkStore(OP_EXPORT, TYPE_U32, dstToSym(dst, c), ptr, val)->perPatch =
                info->out[idx].patch;
       }
+   } else
+   if (f == TGSI_FILE_OUTPUT && prog->getType() == Program::TYPE_VERTEX) {
+      // For vertex shaders, collect outputs to emit later
+      vertexOutputs.push_back(VertexOutput(dst, c, val, ptr));
    } else
    if (f == TGSI_FILE_TEMPORARY ||
        f == TGSI_FILE_ADDRESS ||
@@ -3835,7 +3852,7 @@ Converter::handleInstruction(const struct tgsi_full_instruction *insn)
       BasicBlock *epilogue = BasicBlock::get(func->cfgExit);
       bb->cfg.attach(&epilogue->cfg, Graph::Edge::TREE);
       setPosition(epilogue, true);
-      if (prog->getType() == Program::TYPE_FRAGMENT)
+      if (prog->getType() == Program::TYPE_FRAGMENT || prog->getType() == Program::TYPE_VERTEX)
          exportOutputs();
       if ((prog->getType() == Program::TYPE_VERTEX ||
            prog->getType() == Program::TYPE_TESSELLATION_EVAL
@@ -4313,40 +4330,62 @@ Converter::handleUserClipPlanes()
 void
 Converter::exportOutputs()
 {
-   if (info->io.alphaRefBase) {
-      for (unsigned int i = 0; i < info->numOutputs; ++i) {
-         if (info->out[i].sn != TGSI_SEMANTIC_COLOR ||
-             info->out[i].si != 0)
-            continue;
-         const unsigned int c = 3;
-         if (!oData.exists(sub.cur->values, i, c))
-            continue;
-         Value *val = oData.load(sub.cur->values, i, c, NULL);
-         if (!val)
-            continue;
+   if (prog->getType() == Program::TYPE_FRAGMENT || prog->getType() == Program::TYPE_VERTEX) {
+      if (prog->getType() == Program::TYPE_FRAGMENT) {
+         if (info->io.alphaRefBase) {
+            for (unsigned int i = 0; i < info->numOutputs; ++i) {
+               if (info->out[i].sn != TGSI_SEMANTIC_COLOR ||
+                  info->out[i].si != 0)
+                  continue;
+               const unsigned int c = 3;
+               if (!oData.exists(sub.cur->values, i, c))
+                  continue;
+               Value *val = oData.load(sub.cur->values, i, c, NULL);
+               if (!val)
+                  continue;
 
-         Symbol *ref = mkSymbol(FILE_MEMORY_CONST, info->io.auxCBSlot,
-                                TYPE_U32, info->io.alphaRefBase);
-         Value *pred = new_LValue(func, FILE_PREDICATE);
-         mkCmp(OP_SET, CC_TR, TYPE_U32, pred, TYPE_F32, val,
-               mkLoadv(TYPE_U32, ref, NULL))
-            ->subOp = 1;
-         mkOp(OP_DISCARD, TYPE_NONE, NULL)->setPredicate(CC_NOT_P, pred);
-      }
-   }
-
-   for (unsigned int i = 0; i < info->numOutputs; ++i) {
-      for (unsigned int c = 0; c < 4; ++c) {
-         if (!oData.exists(sub.cur->values, i, c))
-            continue;
-         Symbol *sym = mkSymbol(FILE_SHADER_OUTPUT, 0, TYPE_F32,
-                                info->out[i].slot[c] * 4);
-         Value *val = oData.load(sub.cur->values, i, c, NULL);
-         if (val) {
-            if (info->out[i].sn == TGSI_SEMANTIC_POSITION)
-               mkOp1(OP_SAT, TYPE_F32, val, val);
-            mkStore(OP_EXPORT, TYPE_F32, sym, NULL, val);
+               Symbol *ref = mkSymbol(FILE_MEMORY_CONST, info->io.auxCBSlot,
+                                    TYPE_U32, info->io.alphaRefBase);
+               Value *pred = new_LValue(func, FILE_PREDICATE);
+               mkCmp(OP_SET, CC_TR, TYPE_U32, pred, TYPE_F32, val,
+                     mkLoadv(TYPE_U32, ref, NULL))
+                  ->subOp = 1;
+               mkOp(OP_DISCARD, TYPE_NONE, NULL)->setPredicate(CC_NOT_P, pred);
+            }
          }
+
+         for (unsigned int i = 0; i < info->numOutputs; ++i) {
+            for (unsigned int c = 0; c < 4; ++c) {
+               if (!oData.exists(sub.cur->values, i, c))
+                  continue;
+               Symbol *sym = mkSymbol(FILE_SHADER_OUTPUT, 0, TYPE_F32,
+                                    info->out[i].slot[c] * 4);
+               Value *val = oData.load(sub.cur->values, i, c, NULL);
+               if (val) {
+                  if (info->out[i].sn == TGSI_SEMANTIC_POSITION)
+                     mkOp1(OP_SAT, TYPE_F32, val, val);
+                  mkStore(OP_EXPORT, TYPE_F32, sym, NULL, val);
+               }
+            }
+         }
+      } else if (prog->getType() == Program::TYPE_VERTEX) {
+         // Emit all collected vertex outputs in the original format
+         for (size_t i = 0; i < vertexOutputs.size(); ++i) {
+            const VertexOutput &output = vertexOutputs[i];
+            const unsigned idx = output.dst.getIndex(0);
+            
+            if (output.ptr || (info->out[idx].mask & (1 << output.c))) {
+               if (info->out[idx].sn == TGSI_SEMANTIC_VIEWPORT_INDEX &&
+                   viewport != NULL) {
+                  mkOp1(OP_MOV, TYPE_U32, viewport, output.val);
+               } else {
+                  mkStore(OP_EXPORT, TYPE_U32, dstToSym(output.dst, output.c), 
+                         output.ptr, output.val)->perPatch = info->out[idx].patch;
+               }
+            }
+         }
+         // Clear the vector after emitting all outputs
+         vertexOutputs.clear();
       }
    }
 }
