@@ -699,8 +699,8 @@ NVNshaderControl DekoCompiler::CreateControlHeader() const
 	control.magic = 0x98761234;
 	control.mMajorVer = 1;
 	control.mMinorVer = 5;
-	control.unk0 = 0x120;
-	control.unk1 = 0xb;
+	control.arch = 0x120;
+	control.impl = 0xb;
 
 	control.mProgramSize = 0x50 + m_codeSize;
 	control.mConstBufSize = m_dataSize;

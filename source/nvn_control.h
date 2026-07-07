@@ -20,8 +20,8 @@ struct NVNshaderControl {
     uint32_t mMajorVer; // = 1
     uint32_t mMinorVer; // = 5, lowest supported version for maximum compatibility as nvn is backwards compatible
 
-    uint32_t unk0; // = 120
-    uint32_t unk1; // = 0xb
+    uint32_t arch; //0x120 = NVGPU_GPU_ARCH_GM200
+    uint32_t impl; //For 0x120, 0xB = NVGPU_GPU_IMPL_GM20B
 
     uint32_t mGlasmOffset; // = sizeof(NVNshaderControl) - 8
     uint32_t mGlasmSize; // = 0
